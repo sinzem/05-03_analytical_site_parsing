@@ -2,28 +2,19 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const puppeteer = require("puppeteer");
-const {siteName,
-        hideBrowser,
-        proxy,
-        littleInterval,
-        middleInterval,
-        bigInterval,
-    } = require("./parsingSettings/parsingTelemetrSettings.js");
+const telemetrSettings = require("./parsingSettings/parsingTelemetrSettings.js");
+    /* (Settings and description of work are in the telemetrSettings document) */
 
+async function parsingTelemetr() {
 
+    let pagesTotal = telemetrSettings.pagesForParsing;
+    const findChannelBtn = telemetrSettings.findChannelBtn;
 
-async function parsingTelemetr(urlName, name, pagesTotal) {
-
-    let url;
-    if (urlName.toLowerCase() === "telemetr") {
-        url = siteName;
-    }
-    
     const browser = await puppeteer.launch({
-        timeout: 60000,
-        headless: hideBrowser,
-        // args: proxy,
-        userDataDir: 'C:/Users/sinzem/AppData/Local/Google/Chrome/User Data/Profile 2/Sessions',
+        timeout: telemetrSettings.middleInterval,
+        headless: false,
+        // args: telemetrSettings.proxy,
+        userDataDir: process.env.PATH_TO_TEMP || null,
     });
     const page = await browser.newPage();
     await page.setViewport({width: 1200, height: 800});
@@ -31,78 +22,69 @@ async function parsingTelemetr(urlName, name, pagesTotal) {
     await page.exposeFunction('startButtonClicked', async () => {
         console.log("Start process");
         let tgData = [];
+        let describe = "";
         let currentPage = 1;
+
         while (pagesTotal) {
-            
-            await new Promise(resolve => { setTimeout(resolve, 29000)});
-            let arr = await page.evaluate((currentPage, pagesTotal) => {
+            --pagesTotal;
+            await new Promise(resolve => { setTimeout(resolve, telemetrSettings.littleInterval)});
+            let arr = await page.evaluate((currentPage, pagesTotal, obj) => {
                 let channelCards = [];
-                let evenCards = document.querySelectorAll("tr.tr_even"); 
-                let oddCards = document.querySelectorAll("tr.tr_odd"); 
+                let evenCards = document.querySelectorAll(obj.evenCardsSelector); 
+                let oddCards = document.querySelectorAll(obj.oddCardsSelector); 
                 evenCards.forEach((e, i) => i % 2 === 0 ? channelCards.push(e) : null);
                 oddCards.forEach((e, i) => i % 2 === 0 ? channelCards.push(e) : null);
                 
                 let cardsData = [];
                 channelCards.forEach(card => {
-                    let link = card.querySelector("a.kt-ch-title");
+                    let link = card.querySelector(obj.titleCardSelector);
                     let name = link.textContent;
                     let tgAddress = link.href.split("/").at(-1);
-                    let participantsElem = card.querySelector('[data-do="show_dynamic_participants"]');
+                    let participantsElem = card.querySelector(obj.participantsSelector);
                     let participants = participantsElem.textContent.trim();
                     let cardData = {name, tgAddress, participants};
                     cardsData.push(cardData);
                 }) 
-                // data = [...data, ...cardsData];
-                // let channelsJson = JSON.stringify(cardsData, null, 2); 
-                // return channelsJson;
-                // console.log(data);
+                
+                let describeInput = document.querySelector(obj.describeInput);
+                let describeInputValue = describeInput.value;
                 let nextPage = currentPage + 1;
-                let reject = pagesTotal;
-                let paginationBtns = document.querySelectorAll("a.btn-light");
+                let paginationBtns = document.querySelectorAll(obj.paginationsBtnsSelector);
                 let flag = 0;
                 paginationBtns.forEach(e => {
-                    if (e.textContent == nextPage && flag === 0) {
+                    if (e.textContent == nextPage && flag === 0 && pagesTotal > 0) {
                         e.click();
                         flag++;
                     }
                 })
-                if (flag === 0) {
-                    reject = 0;
-                }
-                return {
-                    cardsData,
-                    nextPage,
-                    reject
-                }
-            }, currentPage, pagesTotal)
+                return { cardsData, nextPage, flag, describeInputValue}
+            }, currentPage, pagesTotal, telemetrSettings)
+            
             tgData = [...tgData, arr.cardsData];
             currentPage = arr.nextPage;
-            if (arr.reject === 0) {
-                pagesTotal = 0; 
-            } else {
-                pagesTotal--; 
-            }
+            arr.flag === 0 ? pagesTotal = 0 : null;
+            arr.describeInputValue ? describe = arr.describeInputValue : describe = "NoName";
         }
-        // console.log(tgData);
-        fs.writeFileSync(path.resolve(__dirname, `${name}.json`), JSON.stringify(tgData, null, 2));
+    
+        fs.writeFileSync(path.resolve(__dirname, "results", `${describe}_${telemetrSettings.pagesForParsing}_${Date.now()}.json`), JSON.stringify(tgData, null, 2));
         console.log("End process");
         await browser.close();
     });
 
-    await page.goto(url);
+    await page.goto(telemetrSettings.siteName);
 
-    await page.waitForSelector("button.btn.btn-block.btn-warning", {timeout: 600000});
-    await page.evaluate(() => {
-        let startBtn = document.querySelector("button.btn.btn-block.btn-warning");
+    await page.waitForSelector(findChannelBtn, {timeout: telemetrSettings.bigInterval});
+    await page.evaluate((btn) => {
+        let startBtn = document.querySelector(btn);
         startBtn.addEventListener("click", () => {
-            console.log("startButtonClicked")
+            console.log("Start button clicked")
             window.startButtonClicked();
         })
-    })
+    }, findChannelBtn)
    
 } 
 
-parsingTelemetr("telemetr", "психология", 3);
+parsingTelemetr();
 
-// analytical chat parsing
+
 
